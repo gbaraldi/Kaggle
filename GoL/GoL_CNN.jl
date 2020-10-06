@@ -6,11 +6,15 @@ using Flux.Losses: logitbinarycrossentropy
 using Statistics
 using DataFrames
 using BSON: @save, @load
+using BSON
+using Zygote
 
+pwd()
+cd("GoL")
 #Data wrangling
 train_data = CSV.File("train.csv"; header =1, drop=[:id, :delta]);
 test_data = CSV.File("test.csv", drop=[:id, :delta]);
-function squarify(data) 
+function squarify(data::CSV.File{true}) 
     rows = [[i for i in data[j]] for j in 1:length(data)]
     starts = Array{Float32}(undef,25, 25,1, length(data))
     stops = Array{Float32}(undef,25, 25,1, length(data))
@@ -23,7 +27,6 @@ function squarify(data)
     return(starts, stops)
 end
 
-train_data.names
 y, x = squarify(train_data)  
 
 #Loading data
@@ -31,19 +34,21 @@ y_train = y[:,:,:,1:40000]
 x_train = x[:,:,:,1:40000]
 y_verify = y[:,:,:,40001:end]
 x_verify = x[:,:,:,40001:end]
-data_train = DataLoader(x_train, y_train, batchsize = 500, shuffle = true)
+data_train = DataLoader(x_train, y_train, batchsize = 200, shuffle = true)
 verify = DataLoader(x_verify, y_verify, batchsize = 1000 )
 
 ##creating model
 model = Chain( 
     Conv((3,3),1=>24, pad=(1,1), elu),
     BatchNorm(24),
-    Dropout(0.2),
+    Dropout(0.4),
     Conv((3,3),24=>64, pad=(1,1),elu),
     BatchNorm(64),
-    Dropout(0.2),
-    Dropout(0.2),
-    Conv((3,3),64=>1, pad=(1,1), sigmoid),
+    Dropout(0.4),
+    Conv((3,3),64=>128, pad=(1,1),elu),
+    BatchNorm(128),
+    Dropout(0.4),
+    Conv((3,3),128=>1, pad=(1,1), sigmoid),
 )
 
 
@@ -68,11 +73,8 @@ function accuracy(data_loader, model)
     end
     return acc/length(data_loader)
 end
-
-# BSON.@load "satisfeito.bson" par
+@load "satisfeito.bson" par acc
 # Flux.loadparams!(model, par)
-
-
 
 verify = gpu.(verify)
 
@@ -90,7 +92,8 @@ accuracy(data_train, model)
 @epochs 1 Flux.train!(loss, Flux.params(model), data_train, opt, cb = evalcb)
 
 par = params(model)
-@save "satisfeito.bson" par acc
+typeof(acc)
+@save "satisfeito_deeper.bson" par acc
 
 #testing
 
@@ -103,7 +106,7 @@ function testify(data)
     end
     return stops
 end
-testmode!(model)
+testmode!(model, true)
 test = DataLoader(testify(test_data))
 test = gpu.(test)
 
@@ -121,7 +124,7 @@ final2 = Array{Array{Int32,1}}(final)
 a = copy(test_data.names)
 pushfirst!(a,:id)
 
-test_ids = (CSV.File("test.csv", select=[:id]))
+test_ids = (CSV.File("testUndefVarError: Zygote not defined.csv", select=[:id]))
 test_ids.id
 for (i,row) in enumerate(final2)
     pushfirst!(row,test_ids.id[i])
